@@ -16,36 +16,15 @@ const {
 } = require("discord.js");
 
 // ==========================
-// 🔧 CONFIG
+// CONFIG
 // ==========================
-
-const BOUTONS = [
-  {
-    id: "IRMA",
-    label: "🪬 IRMA",
-    roleId: process.env.ROLE_IRMA,
-    style: ButtonStyle.Primary,
-  },
-  {
-    id: "METEO",
-    label: "🌦️ Météo",
-    roleId: process.env.ROLE_METEO,
-    style: ButtonStyle.Secondary,
-  },
-  {
-    id: "news",
-    label: "📰 News",
-    roleId: process.env.ROLE_NEWS,
-    style: ButtonStyle.Success,
-  },
-];
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
 });
 
 // ==========================
-// 📌 COMMANDES
+// COMMANDES
 // ==========================
 
 const commands = [
@@ -59,16 +38,11 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("message")
-    .setDescription("Envoyer un message avec le bot")
+    .setDescription("Envoyer un message")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     .addStringOption(opt =>
       opt.setName("texte").setDescription("Message").setRequired(true)
     ),
-
-  new SlashCommandBuilder()
-    .setName("setup-roles")
-    .setDescription("Créer les boutons de rôles")
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
 ].map(c => c.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
@@ -84,7 +58,7 @@ async function registerCommands() {
 }
 
 // ==========================
-// 🚀 READY
+// READY
 // ==========================
 
 client.once(Events.ClientReady, async () => {
@@ -93,32 +67,28 @@ client.once(Events.ClientReady, async () => {
 });
 
 // ==========================
-// 🖱️ INTERACTIONS
+// INTERACTIONS
 // ==========================
 
 client.on(Events.InteractionCreate, async interaction => {
 
   if (interaction.isChatInputCommand()) {
 
-    // ======================
-    // /aide
-    // ======================
+    // ===== /aide =====
     if (interaction.commandName === "aide") {
       const embed = new EmbedBuilder()
         .setTitle("📖 Aide")
         .setDescription("Commande disponible :")
         .addFields({
           name: "/ticket",
-          value: "Ouvre un ticket avec le staff",
+          value: "Ouvre un ticket privé avec le staff",
         })
         .setColor("Blue");
 
       return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
-    // ======================
-    // /message (ADMIN / STAFF)
-    // ======================
+    // ===== /message =====
     if (interaction.commandName === "message") {
       const isAdmin = interaction.user.id === process.env.ADMIN_ID;
       const isStaff = interaction.member.roles.cache.has(process.env.STAFF_ROLE_ID);
@@ -140,33 +110,7 @@ client.on(Events.InteractionCreate, async interaction => {
       });
     }
 
-    // ======================
-    // /setup-roles (ADMIN)
-    // ======================
-    if (interaction.commandName === "setup-roles") {
-      const row = new ActionRowBuilder().addComponents(
-        BOUTONS.map(b =>
-          new ButtonBuilder()
-            .setCustomId(b.id)
-            .setLabel(b.label)
-            .setStyle(b.style)
-        )
-      );
-
-      await interaction.channel.send({
-        content: "Choisis tes rôles pour activer les notifications là où tu le veux 👇",
-        components: [row],
-      });
-
-      return interaction.reply({
-        content: "Menu créé",
-        ephemeral: true,
-      });
-    }
-
-    // ======================
-    // /ticket
-    // ======================
+    // ===== /ticket =====
     if (interaction.commandName === "ticket") {
 
       const existing = interaction.guild.channels.cache.find(
@@ -191,11 +135,28 @@ client.on(Events.InteractionCreate, async interaction => {
           },
           {
             id: interaction.user.id,
-            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages],
+            allow: [
+              PermissionFlagsBits.ViewChannel,
+              PermissionFlagsBits.SendMessages,
+              PermissionFlagsBits.ReadMessageHistory,
+            ],
           },
           {
             id: process.env.STAFF_ROLE_ID,
-            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages],
+            allow: [
+              PermissionFlagsBits.ViewChannel,
+              PermissionFlagsBits.SendMessages,
+              PermissionFlagsBits.ReadMessageHistory,
+            ],
+          },
+          {
+            id: client.user.id,
+            allow: [
+              PermissionFlagsBits.ViewChannel,
+              PermissionFlagsBits.SendMessages,
+              PermissionFlagsBits.ReadMessageHistory,
+              PermissionFlagsBits.ManageChannels,
+            ],
           },
         ],
       });
@@ -219,27 +180,8 @@ client.on(Events.InteractionCreate, async interaction => {
     }
   }
 
-  // ======================
-  // BOUTONS
-  // ======================
+  // ===== bouton fermer ticket =====
   if (interaction.isButton()) {
-
-    // rôles
-    const bouton = BOUTONS.find(b => b.id === interaction.customId);
-
-    if (bouton) {
-      const role = await interaction.guild.roles.fetch(bouton.roleId);
-
-      if (interaction.member.roles.cache.has(role.id)) {
-        await interaction.member.roles.remove(role);
-        return interaction.reply({ content: "❌ retiré", ephemeral: true });
-      }
-
-      await interaction.member.roles.add(role);
-      return interaction.reply({ content: "✅ ajouté", ephemeral: true });
-    }
-
-    // fermer ticket
     if (interaction.customId === "close_ticket") {
       await interaction.channel.delete();
     }
