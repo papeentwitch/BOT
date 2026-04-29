@@ -15,14 +15,16 @@ const {
   PermissionFlagsBits,
 } = require("discord.js");
 
-// =====================================================
-// CONFIG FACILE À MODIFIER
-// =====================================================
+// ==========================
+// 🔧 CONFIGURATION
+// ==========================
 
-const MESSAGE_ROLES = "Choisis tes rôles afin d'activer les notifications et rien louper 👇";
+const MESSAGE_ROLES = "Clique sur les boutons ci-dessous pour ajouter ou retirer tes rôles.";
+const ticketCooldown = new Map();
+const COOLDOWN_TICKET_MS = 60 * 1000;
 
-// Boutons de rôles. Modifie les noms/labels/variables ici.
-const BOUTONS_ROLES = [
+// 🔘 Boutons de rôles : modifie ici si tu ajoutes des rôles
+const BOUTONS = [
   {
     id: "IRMA",
     label: "🪬 IRMA",
@@ -31,7 +33,7 @@ const BOUTONS_ROLES = [
   },
   {
     id: "METEO",
-    label: "🌦️ La météo",
+    label: "🌦️ Météo",
     roleId: process.env.ROLE_METEO,
     style: ButtonStyle.Secondary,
   },
@@ -43,42 +45,29 @@ const BOUTONS_ROLES = [
   },
 ];
 
-// Réactions automatiques : si un message contient le mot, le bot réagit.
-const REACTIONS_AUTOMATIQUES = [
-  { mot: "café", emoji: "☕" },
-  { mot: "bonjour", emoji: "👋" },
-  { mot: "merci", emoji: "❤️" },
-  { mot: "bug", emoji: "🎫" },
-];
-
-// Réponses automatiques : si un message contient le mot, le bot répond.
 const REPONSES_AUTOMATIQUES = [
-  { mot: "bonjour", reponse: "Salut 👋" },
-  { mot: "merci", reponse: "Avec plaisir !" },
-  { mot: "ticket", reponse: "Tu peux ouvrir un ticket avec `/ticket` 🎫" },
-  { mot: "problème", reponse: "Si tu as besoin d’aide, utilise `/ticket` 🎫" },
+  { mots: ["bonjour", "salut", "coucou"], reponse: "Salut 👋" },
+  { mots: ["merci"], reponse: "Avec plaisir ! ☕" },
+  { mots: ["ticket", "problème", "probleme", "bug"], reponse: "Besoin d'aide ? Utilise la commande `/ticket` pour contacter le staff." },
 ];
 
-// Messages aléatoires dans un salon précis.
-// Mets SALON_FUN_ID dans Render si tu veux activer cette option.
+const REACTIONS_AUTOMATIQUES = [
+  { mots: ["café", "cafe"], emoji: "☕" },
+  { mots: ["gg", "bravo"], emoji: "🎉" },
+  { mots: ["mdr", "lol"], emoji: "😂" },
+];
+
 const PHRASES_ALEATOIRES = [
-  "Je surveille 👀",
-  "Quelqu’un a dit café ? ☕",
-  "Intéressant...",
+  "Je surveille discrètement 👀",
+  "Quelqu’un a parlé de café ? ☕",
+  "Message validé par CAFETTE ✅",
   "Je note ça dans mon carnet secret 📒",
-  "Cafette approuve ce message ✅",
+  "Intéressant... très intéressant.",
 ];
 
-// Chance de réponse aléatoire : 0.05 = 5%.
-const CHANCE_MESSAGE_ALEATOIRE = 0.05;
-
-// Anti-spam ticket : 60 secondes.
-const ticketCooldown = new Map();
-const COOLDOWN_TICKET_MS = 60 * 1000;
-
-// =====================================================
-// CLIENT DISCORD
-// =====================================================
+// ==========================
+// 🤖 CLIENT
+// ==========================
 
 const client = new Client({
   intents: [
@@ -89,12 +78,32 @@ const client = new Client({
   ],
 });
 
-// =====================================================
-// COMMANDES SLASH
-// =====================================================
+// ==========================
+// 🛠️ OUTILS
+// ==========================
+
+function safeChannelName(name) {
+  return name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9-_]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 50) || "utilisateur";
+}
+
+function isStaffOrAdmin(interaction) {
+  const isAdmin = interaction.user.id === process.env.ADMIN_ID;
+  const isStaff = interaction.member.roles.cache.has(process.env.STAFF_ROLE_ID);
+  return isAdmin || isStaff;
+}
+
+// ==========================
+// 📌 COMMANDES
+// ==========================
 
 const commands = [
-  // Visible par tout le monde
   new SlashCommandBuilder()
     .setName("ticket")
     .setDescription("Ouvre un ticket privé avec le staff"),
@@ -103,7 +112,6 @@ const commands = [
     .setName("aide")
     .setDescription("Affiche l'aide du bot"),
 
-  // Staff/admin seulement : Discord cache la commande aux membres classiques
   new SlashCommandBuilder()
     .setName("message")
     .setDescription("Envoyer un message simple avec le bot")
@@ -115,7 +123,6 @@ const commands = [
         .setRequired(true)
     ),
 
-  // Staff/admin seulement : pour créer le menu de rôles
   new SlashCommandBuilder()
     .setName("setup-roles")
     .setDescription("Envoie le message avec les boutons de rôles")
@@ -135,28 +142,61 @@ async function registerCommands() {
     );
     console.log("Commandes enregistrées.");
   } catch (error) {
-    console.error("Erreur lors de l'enregistrement des commandes :", error);
+    console.error("Erreur enregistrement commandes :", error);
   }
 }
 
-// =====================================================
-// READY
-// =====================================================
+// ==========================
+// 🚀 BOT PRÊT
+// ==========================
 
 client.once(Events.ClientReady, async () => {
   console.log(`Connecté en tant que ${client.user.tag}`);
   await registerCommands();
 });
 
-// =====================================================
-// COMMANDES + BOUTONS
-// =====================================================
+// ==========================
+// 💬 MESSAGES AUTO / RÉACTIONS
+// ==========================
+
+client.on(Events.MessageCreate, async message => {
+  if (message.author.bot || !message.guild) return;
+
+  const contenu = message.content.toLowerCase();
+
+  for (const reaction of REACTIONS_AUTOMATIQUES) {
+    if (reaction.mots.some(mot => contenu.includes(mot))) {
+      await message.react(reaction.emoji).catch(() => null);
+    }
+  }
+
+  for (const auto of REPONSES_AUTOMATIQUES) {
+    if (auto.mots.some(mot => contenu.includes(mot))) {
+      await message.reply(auto.reponse).catch(() => null);
+      break;
+    }
+  }
+
+  if (process.env.SALON_FUN_ID && message.channel.id === process.env.SALON_FUN_ID) {
+    if (Math.random() < 0.05) {
+      const phrase = PHRASES_ALEATOIRES[Math.floor(Math.random() * PHRASES_ALEATOIRES.length)];
+      await message.channel.send(phrase).catch(() => null);
+    }
+  }
+});
+
+// ==========================
+// 🖱️ INTERACTIONS
+// ==========================
 
 client.on(Events.InteractionCreate, async interaction => {
   try {
+    // ==========================
+    // COMMANDES SLASH
+    // ==========================
     if (interaction.isChatInputCommand()) {
       // --------------------------
-      // /aide : visible par tout le monde, mais n'affiche que /ticket
+      // /aide
       // --------------------------
       if (interaction.commandName === "aide") {
         const embed = new EmbedBuilder()
@@ -164,7 +204,7 @@ client.on(Events.InteractionCreate, async interaction => {
           .setDescription("Commande disponible :")
           .addFields({
             name: "/ticket",
-            value: "Ouvre un ticket privé avec le staff.",
+            value: "Ouvre un ticket privé avec le staff. Tape simplement `/ticket`, puis appuie sur Entrée.",
           })
           .setColor("Blue");
 
@@ -172,13 +212,10 @@ client.on(Events.InteractionCreate, async interaction => {
       }
 
       // --------------------------
-      // /message : admin ou staff uniquement
+      // /message staff/admin
       // --------------------------
       if (interaction.commandName === "message") {
-        const isAdmin = interaction.user.id === process.env.ADMIN_ID;
-        const isStaff = interaction.member.roles.cache.has(process.env.STAFF_ROLE_ID);
-
-        if (!isAdmin && !isStaff) {
+        if (!isStaffOrAdmin(interaction)) {
           return interaction.reply({
             content: "❌ Tu n'as pas la permission d'utiliser cette commande.",
             ephemeral: true,
@@ -195,27 +232,31 @@ client.on(Events.InteractionCreate, async interaction => {
       }
 
       // --------------------------
-      // /setup-roles : crée le message des boutons de rôles
+      // /setup-roles staff/admin
       // --------------------------
       if (interaction.commandName === "setup-roles") {
-        const boutons = BOUTONS_ROLES.map(bouton =>
-          new ButtonBuilder()
-            .setCustomId(bouton.id)
-            .setLabel(bouton.label)
-            .setStyle(bouton.style)
-        );
+        if (!isStaffOrAdmin(interaction)) {
+          return interaction.reply({
+            content: "❌ Tu n'as pas la permission d'utiliser cette commande.",
+            ephemeral: true,
+          });
+        }
 
-        const row = new ActionRowBuilder().addComponents(boutons);
+        const row = new ActionRowBuilder().addComponents(
+          BOUTONS.map(bouton =>
+            new ButtonBuilder()
+              .setCustomId(bouton.id)
+              .setLabel(bouton.label)
+              .setStyle(bouton.style)
+          )
+        );
 
         const embed = new EmbedBuilder()
           .setTitle("🎭 Choix des rôles")
           .setDescription(MESSAGE_ROLES)
           .setColor("Blue");
 
-        await interaction.channel.send({
-          embeds: [embed],
-          components: [row],
-        });
+        await interaction.channel.send({ embeds: [embed], components: [row] });
 
         return interaction.reply({
           content: "✅ Message des rôles envoyé.",
@@ -224,7 +265,7 @@ client.on(Events.InteractionCreate, async interaction => {
       }
 
       // --------------------------
-      // /ticket : 1 ticket max par personne + anti-spam
+      // /ticket
       // --------------------------
       if (interaction.commandName === "ticket") {
         const userId = interaction.user.id;
@@ -232,31 +273,39 @@ client.on(Events.InteractionCreate, async interaction => {
         const lastTicket = ticketCooldown.get(userId);
 
         if (lastTicket && now - lastTicket < COOLDOWN_TICKET_MS) {
-          const secondesRestantes = Math.ceil(
-            (COOLDOWN_TICKET_MS - (now - lastTicket)) / 1000
-          );
-
+          const secondes = Math.ceil((COOLDOWN_TICKET_MS - (now - lastTicket)) / 1000);
           return interaction.reply({
-            content: `⏳ Attends encore ${secondesRestantes} secondes avant de refaire un ticket.`,
+            content: `⏳ Attends encore ${secondes} secondes avant de refaire un ticket.`,
             ephemeral: true,
           });
         }
 
-        const existingTicket = interaction.guild.channels.cache.find(
-          channel => channel.name === `ticket-${userId}`
+        const existing = interaction.guild.channels.cache.find(channel =>
+          channel.name.includes(userId) && channel.name.startsWith("ticket-")
         );
 
-        if (existingTicket) {
+        if (existing) {
           return interaction.reply({
-            content: `❌ Tu as déjà un ticket ouvert : ${existingTicket}`,
+            content: `❌ Tu as déjà un ticket ouvert : ${existing}`,
             ephemeral: true,
           });
         }
 
         ticketCooldown.set(userId, now);
 
+        const staffRole = await interaction.guild.roles.fetch(process.env.STAFF_ROLE_ID);
+        if (!staffRole) {
+          return interaction.reply({
+            content: "❌ Le rôle staff est introuvable. Vérifie STAFF_ROLE_ID.",
+            ephemeral: true,
+          });
+        }
+
+        const pseudo = safeChannelName(interaction.member.displayName || interaction.user.username);
+        const ticketName = `ticket-${pseudo}-${userId}`.slice(0, 90);
+
         const ticketChannel = await interaction.guild.channels.create({
-          name: `ticket-${userId}`,
+          name: ticketName,
           type: ChannelType.GuildText,
           parent: process.env.TICKET_CATEGORY_ID || null,
           permissionOverwrites: [
@@ -273,7 +322,7 @@ client.on(Events.InteractionCreate, async interaction => {
               ],
             },
             {
-              id: process.env.STAFF_ROLE_ID,
+              id: staffRole.id,
               allow: [
                 PermissionFlagsBits.ViewChannel,
                 PermissionFlagsBits.SendMessages,
@@ -296,44 +345,50 @@ client.on(Events.InteractionCreate, async interaction => {
         const closeButton = new ActionRowBuilder().addComponents(
           new ButtonBuilder()
             .setCustomId("close_ticket")
-            .setLabel("🔒 Fermer le ticket")
+            .setLabel("🔒 Clôturer le ticket")
             .setStyle(ButtonStyle.Danger)
         );
 
         const embed = new EmbedBuilder()
           .setTitle("🎫 Ticket ouvert")
           .setDescription(
-            `Bonjour ${interaction.user}, explique ton problème ici.\n\nUn membre du staff va te répondre dès que possible.`
+            `Bonjour ${interaction.user}, ton ticket est ouvert.\n\nExplique clairement ta demande ici. Le staff te répondra dès que possible.`
+          )
+          .addFields(
+            { name: "Utilisateur", value: `${interaction.user}`, inline: true },
+            { name: "Statut", value: "Ouvert", inline: true }
           )
           .setColor("Green")
           .setTimestamp();
 
         await ticketChannel.send({
-          content: `${interaction.user} <@&${process.env.STAFF_ROLE_ID}>`,
+          content: `${interaction.user} <@&${staffRole.id}>`,
           embeds: [embed],
           components: [closeButton],
         });
 
         return interaction.reply({
-          content: `✅ Ticket créé : ${ticketChannel}`,
+          content: `✅ Ton ticket a été créé ici : ${ticketChannel}\n\nTu peux cliquer dessus et écrire directement ton message au staff.`,
           ephemeral: true,
         });
       }
     }
 
-    // --------------------------
-    // Boutons
-    // --------------------------
+    // ==========================
+    // BOUTONS
+    // ==========================
     if (interaction.isButton()) {
+      // --------------------------
       // Boutons de rôles
-      const bouton = BOUTONS_ROLES.find(b => b.id === interaction.customId);
+      // --------------------------
+      const bouton = BOUTONS.find(b => b.id === interaction.customId);
 
       if (bouton) {
         const role = await interaction.guild.roles.fetch(bouton.roleId);
 
         if (!role) {
           return interaction.reply({
-            content: "❌ Rôle introuvable.",
+            content: `❌ Le rôle lié au bouton **${bouton.label}** est introuvable.`,
             ephemeral: true,
           });
         }
@@ -353,93 +408,58 @@ client.on(Events.InteractionCreate, async interaction => {
         });
       }
 
-      // Fermeture ticket : staff/admin seulement
+      // --------------------------
+      // Clôturer ticket
+      // --------------------------
       if (interaction.customId === "close_ticket") {
-        const isTicket = interaction.channel.name.startsWith("ticket-");
-        const isAdmin = interaction.user.id === process.env.ADMIN_ID;
-        const isStaff = interaction.member.roles.cache.has(process.env.STAFF_ROLE_ID);
-
-        if (!isTicket) {
+        if (!interaction.channel.name.startsWith("ticket-")) {
           return interaction.reply({
             content: "❌ Ce bouton ne peut être utilisé que dans un ticket.",
             ephemeral: true,
           });
         }
 
-        if (!isAdmin && !isStaff) {
+        if (!isStaffOrAdmin(interaction)) {
           return interaction.reply({
-            content: "❌ Seul le staff peut fermer ce ticket.",
+            content: "❌ Seul le staff ou un admin peut clôturer ce ticket.",
             ephemeral: true,
           });
         }
 
-        await interaction.reply({
-          content: "🔒 Fermeture du ticket...",
-          ephemeral: true,
-        });
+        const parts = interaction.channel.name.split("-");
+        const ownerId = parts[parts.length - 1];
+        const closedName = interaction.channel.name
+          .replace(/^ticket-/, "termine-")
+          .slice(0, 90);
 
-        setTimeout(() => {
-          interaction.channel.delete().catch(console.error);
-        }, 2000);
+        await interaction.channel.permissionOverwrites.edit(ownerId, {
+          ViewChannel: true,
+          SendMessages: false,
+          ReadMessageHistory: true,
+        }).catch(() => null);
+
+        await interaction.channel.setName(closedName).catch(() => null);
+
+        const embed = new EmbedBuilder()
+          .setTitle("🔒 Ticket clôturé")
+          .setDescription(`Ce ticket a été clôturé par ${interaction.user}.\nL'utilisateur ne peut plus écrire ici.`)
+          .setColor("Red")
+          .setTimestamp();
+
+        return interaction.reply({ embeds: [embed] });
       }
     }
   } catch (error) {
     console.error("Erreur interaction :", error);
 
-    if (interaction.deferred || interaction.replied) {
-      return interaction.followUp({
-        content: "❌ Une erreur est survenue.",
-        ephemeral: true,
-      }).catch(console.error);
-    }
-
-    return interaction.reply({
-      content: "❌ Une erreur est survenue.",
-      ephemeral: true,
-    }).catch(console.error);
-  }
-});
-
-// =====================================================
-// RÉACTIONS, RÉPONSES ET MESSAGES FUN
-// =====================================================
-
-client.on(Events.MessageCreate, async message => {
-  try {
-    if (message.author.bot) return;
-    if (!message.guild) return;
-
-    const contenu = message.content.toLowerCase();
-
-    // Réactions automatiques
-    for (const item of REACTIONS_AUTOMATIQUES) {
-      if (contenu.includes(item.mot.toLowerCase())) {
-        await message.react(item.emoji).catch(() => {});
+    if (interaction.isRepliable()) {
+      const message = "❌ Une erreur est survenue. Vérifie les permissions du bot.";
+      if (interaction.replied || interaction.deferred) {
+        await interaction.followUp({ content: message, ephemeral: true }).catch(() => null);
+      } else {
+        await interaction.reply({ content: message, ephemeral: true }).catch(() => null);
       }
     }
-
-    // Réponses automatiques
-    for (const item of REPONSES_AUTOMATIQUES) {
-      if (contenu.includes(item.mot.toLowerCase())) {
-        await message.reply(item.reponse).catch(() => {});
-        break; // évite plusieurs réponses sur un seul message
-      }
-    }
-
-    // Message aléatoire dans un salon précis
-    if (
-      process.env.SALON_FUN_ID &&
-      message.channel.id === process.env.SALON_FUN_ID &&
-      Math.random() < CHANCE_MESSAGE_ALEATOIRE
-    ) {
-      const phrase = PHRASES_ALEATOIRES[
-        Math.floor(Math.random() * PHRASES_ALEATOIRES.length)
-      ];
-
-      await message.channel.send(phrase).catch(() => {});
-    }
-  } catch (error) {
-    console.error("Erreur MessageCreate :", error);
   }
 });
 
