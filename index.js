@@ -19,7 +19,7 @@ const {
 // 🔧 CONFIGURATION
 // ==========================
 
-const MESSAGE_ROLES = "Clique sur les boutons ci-dessous pour ajouter ou retirer tes rôles.";
+const MESSAGE_ROLES = "Clique sur les boutons ci-dessous pour voir les salons et activer les notifications.";
 const ticketCooldown = new Map();
 const COOLDOWN_TICKET_MS = 60 * 1000;
 
@@ -252,7 +252,7 @@ client.on(Events.InteractionCreate, async interaction => {
         );
 
         const embed = new EmbedBuilder()
-          .setTitle("🎭 Choix des rôles")
+          .setTitle("🎭 Choix des salons/notifications")
           .setDescription(MESSAGE_ROLES)
           .setColor("Blue");
 
